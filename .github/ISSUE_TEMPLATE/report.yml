@@ -1,0 +1,31 @@
+name: Report
+description: A wrong result, a bug, or a run from another machine or macOS build
+body:
+  - type: input
+    id: machine
+    attributes:
+      label: Machine, CPU and GPU
+      placeholder: Legion 5 15IAX10, Core Ultra 9 275HX, RTX 5070 Laptop (nullmoth driver)
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: macOS build, Command Line Tools SDK, hackintosh-feature-test version
+      placeholder: 26.7.1 (25G241), SDK 26.5, 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: summary.md of the pass (or the rows that matter)
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Which probe, what it said, and what you expected. Attach its evidence file from the results folder if it helps, with serial numbers, network names and addresses removed.
+    validations:
+      required: true
