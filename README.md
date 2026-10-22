@@ -1,9 +1,5 @@
 # hackintosh-feature-test
 
-> **Heads up:** a good portion of this code is AI generated. I do understand how it works,
-> and I'm happy to explain any of it. If something looks wrong or you have a question,
-> open an issue or ping me on Discord (`watchthelight`).
-
 A feature test for macOS on PC hardware. It runs 119 checks over graphics, display, video, audio, input, network, Bluetooth, Apple services, power, storage and system services, and writes a table of what works, what half works and what does not, with the raw output of every check saved next to it.
 
 I wrote it to check a Hackintosh laptop after a driver or config change without clicking through System Settings for an hour. Most checks run on their own. The ones that need a human (does the keyboard backlight change, does AirDrop see the phone) open a dialog and ask.
