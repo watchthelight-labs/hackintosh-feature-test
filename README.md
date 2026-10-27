@@ -56,7 +56,7 @@ python3 ft.py run --pass A --area gpu,video      # some areas
 python3 ft.py run --pass A --only gpu.mtlfeat    # one probe
 python3 ft.py guided --pass A                    # the human checks, one dialog each
 python3 ft.py report A                           # writes summary.md
-python3 ft.py report A B                         # and diff.md: every line that changed between the passes
+python3 ft.py report A B                         # and diff.md: every line that changed between the passes (numbers within the probe's `tol`, default 10 %, count as equal)
 ```
 
 A pass is just a name. I run pass A, change one thing (a kext, a driver build, a boot-arg), reboot and run pass B, then `report A B` shows what moved.
@@ -72,7 +72,8 @@ Options and environment:
 | `guided --auto` | take a screenshot for each guided item that can be judged from a still image, mark it Review and move on; the rest become Not tested (needs a person) |
 | `set --pass A <id> <status> <note>` | record a judgement afterwards, for example after looking at the `--auto` screenshots |
 | `FT_PW` | password for the sudo probes; read from the environment, never written anywhere |
-| `FT_GUARD_FILE` | path to a JSON file a driver rollback guard keeps while it waits for you to confirm a boot. GUI probes wait until it is gone or has a `result` key, so the test does not move windows around while you are supposed to be looking at the screen. Leave it unset if you have no such guard |
+| `FT_GUARD_WAIT` | seconds the GUI, sound and pointer probes wait for the guard file before they are recorded as Skipped (default 900) |
+| `FT_GUARD_FILE` | path to a JSON file a driver rollback guard keeps while it waits for you to confirm a boot. GUI probes wait until it is gone, or has `"result": "pass"` with a `started_boot` equal to this boot (a pass left from an earlier boot does not count), so the test does not move windows around while you are supposed to be looking at the screen. Leave it unset if you have no such guard |
 
 Probes that open apps, change the display mode or brightness, or play sound ask first (a dialog with Skip that times out to Continue after 20 s). The camera, microphone and screen recording probes trigger the usual macOS permission prompts for Terminal the first time.
 
