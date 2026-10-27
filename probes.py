@@ -4,7 +4,8 @@
 kind: auto (command + check), info (recorded, Pass means it ran), nt (not tested, with the reason), guided (a person
 judges from a dialog after `prep` opened the thing). needs: gui / sound / pointer (wait for FT_GUARD_FILE, announced),
 sudo (FT_PW), risky (only with --risky; none are run by default). req: a path that must exist, else the probe is N/A.
-passes: "AB" (default), "A" or "B".
+passes: "AB" (default), "A" or "B". tol: relative tolerance the report uses when it compares this probe's numbers
+between two passes (default 0.10).
 Commands run under zsh with FT_REPO (results root), FT_HERE, FT_OD (this pass's evidence folder) set; "SUDO "
 expands to sudo -S.
 """
@@ -90,11 +91,13 @@ def g(id_, area, feature, prompt, prep="", cleanup="", settle=3, needs=("gui",),
 
 
 def a(id_, area, feature, cmd, check=None, kind="auto", needs=(), timeout=120, note="", passes="AB", info_na=False,
-      req=""):
+      req="", tol=None):
     d = dict(id=id_, area=area, feature=feature, kind=kind, cmd=cmd, needs=list(needs), timeout=timeout, note=note,
              passes=passes, info_na=info_na, req=req)
     if check:
         d["check"] = check
+    if tol is not None:
+        d["tol"] = tol
     return d
 
 

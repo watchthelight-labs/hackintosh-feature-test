@@ -10,7 +10,9 @@
 Results go to <out>/<date>/<pass>/: --out or FT_OUT sets <out> (default ./results), FT_DATE overrides the date so
 passes run on different days land in one folder. Probes that need sudo read the password from FT_PW in the
 environment (never stored). If FT_GUARD_FILE is set, nothing that moves the pointer, opens windows or plays sound
-runs while that guard file is pending (see guard_clear).
+runs while that guard file is pending (see guard_clear); after FT_GUARD_WAIT seconds (default 900) those probes are
+recorded as Skipped instead of blocking. The report compares numbers between passes with a relative tolerance (probe
+key tol, default 0.10).
 """
 import argparse, datetime, json, os, re, subprocess, sys, time
 from pathlib import Path
@@ -29,26 +31,55 @@ def outdir(pass_):
     return d
 
 
+def boot_sec():
+    r = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True)
+    m = re.search(r"sec = (\d+)", r.stdout)
+    return int(m.group(1)) if m else None
+
+
+GUARD_WAIT = float(os.environ.get("FT_GUARD_WAIT", "900"))
+guard_state = {"timed_out": False}
+
+
 def guard_clear():
-    """True when no guard window is open. FT_GUARD_FILE names a JSON file that a driver rollback guard keeps while it
-    waits for the user to confirm a boot; it counts as clear when it is missing or has a "result" key."""
+    """(clear, why). FT_GUARD_FILE names a JSON file that a driver rollback guard keeps while it waits for the user to
+    confirm a boot. It is clear when it is missing, or has result "pass" and a started_boot equal to this boot (a
+    pass left over from an earlier boot does not count)."""
     if not os.environ.get("FT_GUARD_FILE"):
-        return True
+        return True, "no guard file"
     p = Path(os.environ["FT_GUARD_FILE"]).expanduser()
     if not p.exists():
-        return True
+        return True, "no guard file"
     try:
-        return bool(json.loads(p.read_text()).get("result"))
-    except Exception:
-        return False
+        j = json.loads(p.read_text())
+    except Exception as e:
+        return False, f"unreadable guard file: {e!r}"
+    if j.get("result") != "pass":
+        return False, f"result={j.get('result') or 'pending'}"
+    if j.get("started_boot") != boot_sec():
+        return False, f"started_boot={j.get('started_boot')} is not this boot ({boot_sec()})"
+    return True, "pass on this boot"
 
 
 def wait_guard():
-    if guard_clear():
-        return
-    print(f"waiting for {os.environ['FT_GUARD_FILE']} to clear before any GUI probe ...", flush=True)
-    while not guard_clear():
+    """Blocks until the guard is clear; False after FT_GUARD_WAIT seconds (and on every later call, without waiting)."""
+    if guard_state["timed_out"]:
+        return False
+    ok, why = guard_clear()
+    if ok:
+        return True
+    print(f"waiting for {os.environ['FT_GUARD_FILE']} to clear before any GUI probe ({why}, up to {GUARD_WAIT:g} s) ...",
+          flush=True)
+    t0 = time.time()
+    while time.time() - t0 < GUARD_WAIT:
         time.sleep(2)
+        ok, why = guard_clear()
+        if ok:
+            return True
+    guard_state["timed_out"] = True
+    guard_state["why"] = why
+    print(f"guard not clear after {GUARD_WAIT:g} s ({why}): GUI, pointer and sound probes are skipped", flush=True)
+    return False
 
 
 def sh(cmd, timeout=120, pw=False, od=None):
@@ -119,8 +150,8 @@ def run_auto(args):
             record(od, rec); continue
         if "risky" in p.get("needs", []) and not args.risky:
             rec.update(status="Not tested (risky)", value="", note="run with --risky"); record(od, rec); continue
-        if set(p.get("needs", [])) & {"gui", "sound", "pointer"}:
-            wait_guard()
+        if set(p.get("needs", [])) & {"gui", "sound", "pointer"} and not wait_guard():
+            rec.update(status="Skipped", value="", note=f"guard timeout: {guard_state.get('why', '')}"); record(od, rec); continue
         if set(p.get("needs", [])) & {"gui", "sound", "pointer"} and not args.no_ask:
             what = {"pointer": "moves the pointer", "sound": "plays sound", "gui": "opens or changes something on screen"}
             how = ", ".join(what[n] for n in p["needs"] if n in what)
@@ -148,10 +179,12 @@ def run_auto(args):
 
 def run_guided(args):
     od = outdir(args.pass_)
-    wait_guard()
+    clear = wait_guard()
     for p in selected(args, ("guided",)):
         rec = {"id": p["id"], "area": p["area"], "feature": p["feature"], "pass": args.pass_, "kind": "guided",
                "time": datetime.datetime.now().isoformat(timespec="seconds")}
+        if not clear:
+            rec.update(status="Skipped", value="", note=f"guard timeout: {guard_state.get('why', '')}"); record(od, rec); continue
         if args.auto and p["id"] not in P.SHOT:
             rec.update(status="Not tested (needs a person)", value="",
                        note="needs hands, a phone or watching motion; not judgeable from a screenshot")
@@ -193,6 +226,33 @@ def load(pass_):
     return res
 
 
+NUM_RX = r"-?\d+(?:\.\d+)?"
+
+
+def values_differ(va, vb, tol):
+    """Compare two recorded values. Numbers (every number in the string, same count) are the same within the relative
+    tolerance; anything else must match exactly. Returns (differ, delta) with delta the largest relative change."""
+    sa, sb = str(va or ""), str(vb or "")
+    na, nb = re.findall(NUM_RX, sa), re.findall(NUM_RX, sb)
+    if na and len(na) == len(nb) and re.sub(NUM_RX, "#", sa) == re.sub(NUM_RX, "#", sb):
+        worst = 0.0
+        for x, y in zip(na, nb):
+            x, y = float(x), float(y)
+            d = 0.0 if x == y else (abs(y - x) / abs(x) if x else float("inf"))
+            if d > abs(worst):
+                worst = d if y >= x else -d
+        return abs(worst) > tol, worst
+    return sa != sb, None
+
+
+def fmt_delta(d):
+    if d is None:
+        return ""
+    if d in (float("inf"), -float("inf")):
+        return "from 0"
+    return f"{d * 100:+.1f}%"
+
+
 def run_report(args):
     a = load(args.passes[0])
     order = [p["id"] for p in P.PROBES]
@@ -217,13 +277,19 @@ def run_report(args):
     print(f"wrote {od / 'summary.md'}")
     if len(args.passes) > 1:
         b = load(args.passes[1])
+        tols = {p["id"]: p.get("tol", 0.10) for p in P.PROBES}
         d = [f"# Feature test: pass {args.passes[0]} vs pass {args.passes[1]}", "",
-             f"| Feature | {args.passes[0]} | {args.passes[1]} | {args.passes[0]} value | {args.passes[1]} value |",
-             "|---|---|---|---|---|"]
+             "Numbers count as the same within the probe's relative tolerance (default 10 %); the delta is the largest "
+             "relative change in the row.", "",
+             f"| Feature | {args.passes[0]} | {args.passes[1]} | {args.passes[0]} value | {args.passes[1]} value | Delta |",
+             "|---|---|---|---|---|---|"]
         for i in order:
-            if i in a and i in b and (a[i]["status"] != b[i]["status"] or str(a[i].get("value")) != str(b[i].get("value"))):
+            if i not in a or i not in b:
+                continue
+            differ, delta = values_differ(a[i].get("value"), b[i].get("value"), tols.get(i, 0.10))
+            if a[i]["status"] != b[i]["status"] or differ:
                 d.append(f"| {a[i]['feature']} | {a[i]['status']} | {b[i]['status']} | {str(a[i].get('value', ''))[:60]} | "
-                         f"{str(b[i].get('value', ''))[:60]} |")
+                         f"{str(b[i].get('value', ''))[:60]} | {fmt_delta(delta)} |")
         (od.parent / "diff.md").write_text("\n".join(d) + "\n")
         print(f"wrote {od.parent / 'diff.md'}")
 
