@@ -1,4 +1,6 @@
-# hackintosh-feature-test
+# WTLHackintoshTest
+
+Renamed from `hackintosh-feature-test` on 2026-10-31; the script names are unchanged. Old links redirect here.
 
 A feature test for macOS on PC hardware. It runs 119 checks over graphics, display, video, audio, input, network, Bluetooth, Apple services, power, storage and system services, and writes a table of what works, what half works and what does not, with the raw output of every check saved next to it.
 
